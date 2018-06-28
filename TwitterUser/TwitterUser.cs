@@ -91,7 +91,11 @@ namespace TwitterAPI
             string result = response.Content.ReadAsStringAsync().Result;
             if (response.StatusCode != HttpStatusCode.OK)
                 if (result.Contains("\"code\":186"))
-                    Console.WriteLine("Невозможно отправить твитт, т.к. длинна текста слишком большая. Ограничение - 280 символов.");
+                {
+                    StatusUpdate(message.Substring(0, 270));
+                    StatusUpdate(message.Substring(270));
+                    Console.WriteLine("Т.к. длинна твитта была слишком большая, было отправлено 2 твитта.");
+                }
                 else if (result.Contains("\"code\":187"))
                     Console.WriteLine("У вас уже есть такой твитт!");
                 else
@@ -101,50 +105,28 @@ namespace TwitterAPI
 
         }
 
-        /// <summary>Получение последних твиттов указанного пользователя. Не работает, твиттер возвращает 401.</summary>
-        /// <param name="userName">Пользователь, чьи твитты будут читаться.</param>
-        /// <param name="count">Количество последних твиттов.</param>
-        public JsonModels.Tweet[] GetLastTweets(string userName = null, int count = 5)
-        {
-            Dictionary<string, string> parameters = new Dictionary<string, string>();
-            if (userName != null)
-                parameters.Add("screen_name", userName);
-            if (count != 0)
-                parameters.Add("count", count.ToString());
-
-            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "https://api.twitter.com/1.1/statuses/user_timeline.json");
-            Tools.SetAuthHeader(request, user, parameters);
-
-            HttpResponseMessage response = Client.SendAsync(request).Result;
-            string json = response.Content.ReadAsStringAsync().Result;
-            if (response.StatusCode != HttpStatusCode.OK)
-                throw new Exception("Ошибка при отправке запроса, сервер вернул: " + json);
-            // Восстанавливаем кириллические символы
-            json = Regex.Replace(json, @"\\u([0-9A-Fa-f]{4})", m => "" + (char)Convert.ToInt32(m.Groups[1].Value, 16));
-
-            var tweets = JsonConvert.DeserializeObject<List<JsonModels.Tweet>>(json);
-
-            List<JsonModels.Tweet> result = new List<JsonModels.Tweet>();
-            for (int i = 0; i < count; i++)
-                try { result.Add(tweets[i]); }
-                catch (IndexOutOfRangeException) { break; }
-
-            return result.ToArray();
-        }
-
         /// <summary>Грязный хак. Парсим html твиттера.</summary>
         /// <param name="userName">Пользователь, чьи твитты будут читаться.</param>
         /// <param name="count">Количество последних твиттов.</param>
-        public string[] GetLastTweetsHack(string userName, ref int count)
+        public string[] GetLastTweets(string userName, ref int count)
         {
             HttpResponseMessage response = Client.GetAsync("https://twitter.com/" + userName).Result;
             string pageText = response.Content.ReadAsStringAsync().Result;
 
-            MatchCollection tweets = Regex.Matches(pageText, @"\sdata-aria-label-part=""0"">(.+)<");
+            Regex pattern = new Regex(@"\s<div class=""js-tweet-text-container"">\s(.*)\s</div>\s");
+            Match match = pattern.Match(pageText);
+            List<string> tweets = new List<string>();
+            while (match.Success)
+            {
+                tweets.Add(Regex.Replace(match.Value, @"<[^>]+>", ""));
+                match = match.NextMatch();
+                if (tweets.Count == count)
+                    break;
+            }
             if (tweets.Count == 0)
                 throw new ArgumentException("Такого пользователя не существует, его аккаунт закрыт, либо у него нет ни одного твитта");
 
-            return Tools.CutSubstrings(pageText, "data-aria-label-part=\"0\">", "<", ref count);
+            return tweets.ToArray();
         }
     }
 }
